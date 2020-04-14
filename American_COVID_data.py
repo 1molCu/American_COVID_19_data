@@ -1,55 +1,75 @@
 # —*— coding: utf-8 —*—
-import requests
+import io
+import os
 import json
 import time
+
+import requests
 import pandas as pd
 
+class DoSomething:
+    def __init__(self, url, headers):
+        self.url = url
+        self.headers = headers
+        self.is_cache = False
 
-url = 'https://view.inews.qq.com/g2/getOnsInfo?name=disease_foreign&callback=&_=%d'
+    def get_data(self):
+        try:
+            r = requests.get(self.url % time.time(), headers = self.headers)
+        except requests.exceptions.ConnectionError as e:
+            cache_path = 'data_cache.txt'
+            if not (os.path.exists(cache_path) and os.path.isfile(cache_path)):
+                open('data_cache.txt','w').close()
+            with open('data_cache.txt', 'r', encoding='utf-8') as f:
+                data = f.read()
+                if data == '': raise Exception('Fatal')
+                self.is_cache = True
+        else:
+            data = json.loads(r.text)['data']
+            with open('data_cache.txt', 'w', encoding='utf-8') as f:
+                f.write(data)
 
-headers = {
-    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/79.0.3945.130 Safari/537.36',
-    'referer': 'https://news.qq.com/zt2020/page/feiyan.htm?from=timeline&isappinstalled=0'
-}
+        return json.loads(data)
 
-r = requests.get(url % time.time(), headers = headers)
+    def handle_data(self, data):
+        lastUpdateTime = data['globalStatis']['lastUpdateTime']
+        print(f"数据更新时间: {lastUpdateTime} " + ('(使用了缓存！)' if self.is_cache else ''))
 
-data = json.loads(r.text)
+        names = ['地区','确诊人数','死亡人数','治愈人数']
 
-data = json.loads(data['data'])
+        df = pd.DataFrame(columns=names)
 
-lastUpdateTime = data['globalStatis']['lastUpdateTime']
+        country = data['foreignList']
 
-print('数据更新时间' + str(lastUpdateTime))
+        for i in range(len(country)):
+            if country[i]['name'] == '美国':
+                item_ps = country[i]['children']
 
-names = ['地区','确诊人数','死亡人数','治愈人数']
+                for item_p in item_ps:
+                    province = item_p['name']
+                    confirm = item_p['confirm']
+                    death = item_p['dead']
+                    heal = item_p['heal']
 
-df = pd.DataFrame(columns=names)
+                    data_dict = {
+                        '地区': province,
+                        '确诊人数' : confirm,
+                        '死亡人数' : death,
+                        '治愈人数' : heal
+                    }
+                    df.loc[len(df)] = data_dict
 
-country = data['foreignList']
+        df.index += 1
+        df.to_csv(f'./test{(lastUpdateTime).split()[0]}.csv', encoding = 'utf_8_sig', header = 'true')
 
-for i in range(0,len(country)):
-    if country[i]['name'] == '美国':
-        item_ps = country[i]['children']
+        print(df)
 
-        for item_p in item_ps:
-            province = item_p['name']
-            confirm = item_p['confirm']
-            death = item_p['dead']
-            heal = item_p['heal']
-
-            data_dict = {
-                '地区': province,
-                '确诊人数' : confirm,
-                '死亡人数' : death,
-                '治愈人数' : heal
-            }
-            
-            df.loc[len(df)] = data_dict
-
-df.index += 1
-df.to_csv(r'./test{}.csv'.format(str(lastUpdateTime).split()[0]),encoding='utf_8_sig',header = 'true')
-
-print('成功')
-
-
+if __name__ == "__main__":
+    url = 'https://view.inews.qq.com/g2/getOnsInfo?name=disease_foreign&callback=&_=%d'
+    headers = {
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/79.0.3945.130 Safari/537.36',
+        'referer': 'https://news.qq.com/zt2020/page/feiyan.htm?from=timeline&isappinstalled=0'
+    }
+    ds = DoSomething(url, headers)
+    data = ds.get_data()
+    ds.handle_data(data)
